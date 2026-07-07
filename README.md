@@ -31,7 +31,7 @@ Why not let the LLM decide severity directly?
 
 1. **Safety** — an LLM should never be the sole authority declaring a real-world emergency state at a mass-gathering event. It can hallucinate, be prompt-injected via free text, or simply guess wrong. The rules engine is the single source of truth for severity; Gemini cannot override it, only narrate it.
 2. **Testability** — thresholds are pure functions with no external dependency, so they're fully unit-tested (`backend/tests/decisionEngine.test.js`, 7 passing tests) without mocking an API.
-3. **Efficiency** — only zones that actually cross a threshold get sent to Gemini at all, which keeps token usage, latency, and cost bounded — instead of asking the LLM to re-reason about six zones on every poll.
+3. **Efficiency** — only zones that actually cross a threshold get sent to Gemini at all, which keeps token usage, latency, and cost bounded — instead of asking the LLM to re-reason about seven zones on every poll.
 
 This hybrid pattern is the "unique way of approach" of this submission: **GenAI as narrator and translator over a deterministic operations core, not as the decision-maker itself.**
 
@@ -41,7 +41,7 @@ Four connected surfaces, one persona:
 
 | Feature | What it does | Track it satisfies |
 |---|---|---|
-| **Live ops dashboard** | Six venue zones (gates, concourses) with occupancy %, queue time, and trend, refreshed every 4s. A "pulse strip" visualization gives an at-a-glance density readout per zone. | Dynamic crowd management |
+| **Live ops dashboard** | Seven venue zones (gates, concourses) with occupancy %, queue time, and trend, refreshed every 4s. A "pulse strip" visualization gives an at-a-glance density readout per zone. | Dynamic crowd management |
 | **Decision copilot** | Click a zone → rules engine classifies severity (normal/watch/alert/critical) and produces a fixed candidate-action set → Gemini writes a 2–3 sentence operator brief explaining what's happening and which action to take first. | Real-time decision support |
 | **Multilingual PA composer** | Staff draft one announcement in English once; Gemini translates it into up to 6 languages simultaneously for immediate broadcast. | Multi-language assistance |
 | **Incident triage** | Staff type a free-text radio report ("fan collapsed near Section 12"); Gemini returns a structured JSON triage — severity, suggested response unit, first dispatch message. | Real-time decision support |
