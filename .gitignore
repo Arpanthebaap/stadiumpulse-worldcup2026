@@ -1,0 +1,18 @@
+# Dependencies (never commit — reviewers run npm install themselves)
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Env files with real secrets
+.env
+.env.local
+
+# Logs / OS cruft
+*.log
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
