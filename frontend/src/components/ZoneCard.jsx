@@ -32,7 +32,7 @@ function PulseStrip({ occupancyRatio, severity }) {
   );
 }
 
-export default function ZoneCard({ zone, selected, onSelect }) {
+function ZoneCard({ zone, selected, onSelect }) {
   return (
     <button
       className={`zone-card severity-${zone.severity}${selected ? " selected" : ""}`}
@@ -70,3 +70,23 @@ export default function ZoneCard({ zone, selected, onSelect }) {
     </button>
   );
 }
+
+// Efficiency: the dashboard polls every 4s and re-fetches all zones, but most
+// individual zones don't change between polls. Without memoization every
+// ZoneCard (and its animated pulse-strip) would re-render on every tick
+// regardless of whether its own data changed. This comparator skips re-render
+// unless this specific zone's relevant fields or selection state changed.
+function zonesAreEqual(prev, next) {
+  const a = prev.zone;
+  const b = next.zone;
+  return (
+    prev.selected === next.selected &&
+    a.severity === b.severity &&
+    a.occupancyRatio === b.occupancyRatio &&
+    a.queueMinutes === b.queueMinutes &&
+    a.trend === b.trend &&
+    a.incident === b.incident
+  );
+}
+
+export default React.memo(ZoneCard, zonesAreEqual);

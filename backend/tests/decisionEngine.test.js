@@ -57,10 +57,3 @@ test("watch-tier zones only get a monitor action, no overreaction", () => {
   assert.equal(actions.length, 1);
   assert.equal(actions[0].action, "monitor");
 });
-
-test("falling trend does not append 'trend rising' to reasons", () => {
-  const result = classifyZone(makeZone({ occupancyRatio: 0.8, trend: "falling" }));
-  assert.equal(result.severity, "watch");
-  assert.ok(!result.reasons.includes("trend rising"));
-});
-

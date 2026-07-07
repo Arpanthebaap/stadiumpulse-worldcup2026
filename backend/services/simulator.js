@@ -16,7 +16,6 @@ const ZONES = [
   { id: "gate-d", label: "Gate D - Family Zone", capacity: 3000 },
   { id: "concourse-1", label: "Concourse 1 - Food Court", capacity: 2500 },
   { id: "concourse-2", label: "Concourse 2 - Merchandise", capacity: 2000 },
-  { id: "fan-zone", label: "Fan Zone Plaza", capacity: 8000 },
 ];
 
 // in-memory state, one entry per zone: current occupancy, queue minutes, trend

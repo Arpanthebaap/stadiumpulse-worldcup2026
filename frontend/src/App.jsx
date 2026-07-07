@@ -24,7 +24,7 @@ export default function App() {
             <div className="brand-sub">FIFA World Cup 2026 · Ops Copilot</div>
           </div>
         </div>
-        <div className={`status-pill`}>
+        <div className="status-pill" role="status" aria-live="polite">
           <span className={`status-dot${geminiLive ? "" : " mock"}`} />
           {geminiLive === null ? "Checking backend…" : geminiLive ? "Gemini live" : "Mock mode (no API key)"}
         </div>

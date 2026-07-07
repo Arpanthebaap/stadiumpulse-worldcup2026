@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { getSnapshot, getZoneById } from "../services/simulator.js";
 import { classifySnapshot, suggestActions } from "../services/decisionEngine.js";
 import {
@@ -10,39 +11,44 @@ import {
 
 const router = Router();
 
-// simple in-memory rate limiter per IP for the Gemini-backed endpoints
-// (Security / Efficiency: protects the API key from abuse and keeps cost bounded)
-const rateBuckets = new Map();
-const RATE_LIMIT = 20; // requests
-const RATE_WINDOW_MS = 60_000;
-
-function rateLimit(req, res, next) {
-  const key = req.ip || "unknown";
-  const now = Date.now();
-  const bucket = rateBuckets.get(key) || [];
-  const recent = bucket.filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) {
-    return res.status(429).json({ error: "Rate limit exceeded. Try again shortly." });
-  }
-  recent.push(now);
-  rateBuckets.set(key, recent);
-  next();
-}
+// Rate limiter for the Gemini-backed endpoints (Security / Efficiency: protects
+// the API key from abuse and keeps cost bounded). Uses express-rate-limit
+// instead of a hand-rolled Map so buckets are pruned automatically and don't
+// grow unbounded on a long-running process.
+const geminiRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Rate limit exceeded. Try again shortly." },
+});
 
 /** GET /api/status - simple health/config check (no secrets exposed) */
 router.get("/status", (req, res) => {
   res.json({ ok: true, geminiLive: isLive() });
 });
 
+// Efficiency: multiple browser tabs/operators polling at once would otherwise
+// each trigger their own simulator tick and JSON serialization. A very short
+// cache window collapses concurrent requests onto one computed snapshot
+// without making the "live" feed feel stale (well under the 4s poll interval).
+const SNAPSHOT_CACHE_MS = 1500;
+let cachedSnapshot = null;
+let cachedAt = 0;
+
 /** GET /api/simulate - live ops snapshot, classified + prioritized */
 router.get("/simulate", (req, res) => {
-  const snapshot = getSnapshot();
-  const classified = classifySnapshot(snapshot);
-  res.json({ zones: classified });
+  const now = Date.now();
+  if (!cachedSnapshot || now - cachedAt > SNAPSHOT_CACHE_MS) {
+    cachedSnapshot = classifySnapshot(getSnapshot());
+    cachedAt = now;
+  }
+  res.set("Cache-Control", "private, max-age=1");
+  res.json({ zones: cachedSnapshot });
 });
 
 /** GET /api/decide/:zoneId - full recommendation for one zone (rules + Gemini narration) */
-router.get("/decide/:zoneId", rateLimit, async (req, res) => {
+router.get("/decide/:zoneId", geminiRateLimit, async (req, res) => {
   const zone = getZoneById(req.params.zoneId);
   if (!zone) return res.status(404).json({ error: "Zone not found" });
 
@@ -59,7 +65,7 @@ router.get("/decide/:zoneId", rateLimit, async (req, res) => {
 });
 
 /** POST /api/announce { text, languages } - draft + translate a PA announcement */
-router.post("/announce", rateLimit, async (req, res) => {
+router.post("/announce", geminiRateLimit, async (req, res) => {
   const { text, languages } = req.body || {};
   if (!text || typeof text !== "string" || text.length > 500) {
     return res.status(400).json({ error: "Provide 'text' (string, max 500 chars)." });
@@ -77,7 +83,7 @@ router.post("/announce", rateLimit, async (req, res) => {
 });
 
 /** POST /api/triage { report } - structure a free-text incident report */
-router.post("/triage", rateLimit, async (req, res) => {
+router.post("/triage", geminiRateLimit, async (req, res) => {
   const { report } = req.body || {};
   if (!report || typeof report !== "string" || report.length > 500) {
     return res.status(400).json({ error: "Provide 'report' (string, max 500 chars)." });

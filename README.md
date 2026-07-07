@@ -31,7 +31,7 @@ Why not let the LLM decide severity directly?
 
 1. **Safety** — an LLM should never be the sole authority declaring a real-world emergency state at a mass-gathering event. It can hallucinate, be prompt-injected via free text, or simply guess wrong. The rules engine is the single source of truth for severity; Gemini cannot override it, only narrate it.
 2. **Testability** — thresholds are pure functions with no external dependency, so they're fully unit-tested (`backend/tests/decisionEngine.test.js`, 7 passing tests) without mocking an API.
-3. **Efficiency** — only zones that actually cross a threshold get sent to Gemini at all, which keeps token usage, latency, and cost bounded — instead of asking the LLM to re-reason about seven zones on every poll.
+3. **Efficiency** — only zones that actually cross a threshold get sent to Gemini at all, which keeps token usage, latency, and cost bounded — instead of asking the LLM to re-reason about six zones on every poll.
 
 This hybrid pattern is the "unique way of approach" of this submission: **GenAI as narrator and translator over a deterministic operations core, not as the decision-maker itself.**
 
@@ -41,7 +41,7 @@ Four connected surfaces, one persona:
 
 | Feature | What it does | Track it satisfies |
 |---|---|---|
-| **Live ops dashboard** | Seven venue zones (gates, concourses) with occupancy %, queue time, and trend, refreshed every 4s. A "pulse strip" visualization gives an at-a-glance density readout per zone. | Dynamic crowd management |
+| **Live ops dashboard** | Six venue zones (gates, concourses) with occupancy %, queue time, and trend, refreshed every 4s. A "pulse strip" visualization gives an at-a-glance density readout per zone. | Dynamic crowd management |
 | **Decision copilot** | Click a zone → rules engine classifies severity (normal/watch/alert/critical) and produces a fixed candidate-action set → Gemini writes a 2–3 sentence operator brief explaining what's happening and which action to take first. | Real-time decision support |
 | **Multilingual PA composer** | Staff draft one announcement in English once; Gemini translates it into up to 6 languages simultaneously for immediate broadcast. | Multi-language assistance |
 | **Incident triage** | Staff type a free-text radio report ("fan collapsed near Section 12"); Gemini returns a structured JSON triage — severity, suggested response unit, first dispatch message. | Real-time decision support |
@@ -71,21 +71,33 @@ No datasets, images, or model weights are stored in the repo — the entire code
 ## 5. Security notes
 
 - **No secrets in source control** — `.env` files are git-ignored; `.env.example` ships instead. The app is fully functional without any key.
+- **Hardened HTTP headers via Helmet** — strict `Content-Security-Policy` (`default-src 'none'`), `X-Frame-Options`, `X-Content-Type-Options: nosniff`, HSTS, and related headers are set on every response.
 - **CORS is restricted** to a configured origin allow-list, not `*`.
 - **Request bodies are size- and length-capped** (announcement/report text ≤ 500 chars, JSON body ≤ 50kb) to reduce prompt-injection/DoS surface.
-- **Per-IP rate limiting** on every Gemini-backed route protects the API key from abuse and bounds cost.
+- **Rate limiting via `express-rate-limit`** on every Gemini-backed route (20 req/min/IP) protects the API key from abuse and bounds cost, with standard `RateLimit-*` response headers and automatic bucket cleanup (no unbounded memory growth on a long-running process).
 - **Errors never leak stack traces** to the client — a generic 500 handler catches unhandled errors server-side.
+- **`x-powered-by` header disabled** so the framework/version isn't advertised to clients.
 - Intended deployment assumes **staff authentication** (e.g. SSO/role-based access) in front of this API; this repo focuses on the operations-logic layer and leaves auth to the venue's existing identity provider, noted here rather than stubbed insecurely.
 
 ## 6. Testing
 
 ```bash
-cd backend
-npm install
-npm test
+cd backend && npm install && npm test    # 7 unit tests, decision engine
+cd frontend && npm install && npm test   # 6 component tests, ZoneCard
 ```
 
-7 unit tests cover the decision engine's threshold boundaries (normal → watch → alert → critical), incident-forced escalation, and that watch-tier zones only ever get a "monitor" action (no overreaction). These are pure-function tests with no network or API dependency, so they run in milliseconds and in CI without secrets.
+**Backend** — 7 unit tests cover the decision engine's threshold boundaries (normal → watch → alert → critical), incident-forced escalation, and that watch-tier zones only ever get a "monitor" action (no overreaction). Pure-function tests, no network/API dependency.
+
+**Frontend** — 6 component tests (Vitest + React Testing Library) cover rendering, the accessible `aria-label`/`aria-pressed` contract, click handling, and incident-flag visibility for `ZoneCard`.
+
+**CI** — `.github/workflows/ci.yml` runs lint + backend tests, and frontend tests + production build, automatically on every push to `main` and every pull request. A green check on the repo is visible proof the app builds and passes tests, not just a claim in this README.
+
+## 6a. Efficiency notes
+
+- **Gzip/deflate compression** on all API responses (`compression` middleware).
+- **Short-lived snapshot caching** (1.5s) on `/api/simulate` — concurrent pollers within the same window share one computed snapshot instead of each triggering a fresh simulator tick and serialization pass, well under the 4s client poll interval so the feed still feels live.
+- **Memoized `ZoneCard`** (`React.memo` with a targeted comparator) — on each 4s poll, only zones whose own data actually changed re-render; unaffected zones (and their animated pulse-strips) skip re-render entirely.
+- **Gemini is only called for zones that cross a threshold** — the rules engine filters first, so routine "normal" zones never generate an LLM call at all, bounding token usage and latency.
 
 ## 7. How to run it
 
