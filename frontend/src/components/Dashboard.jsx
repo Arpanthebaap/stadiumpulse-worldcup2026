@@ -4,6 +4,30 @@ import { getSnapshot } from "../api.js";
 
 const POLL_MS = 4000;
 
+function ZoneCardSkeleton() {
+  return (
+    <div className="skeleton-card skeleton-shimmer">
+      <div className="zone-card-head">
+        <div className="skeleton-text skeleton-label" />
+        <div className="skeleton-text skeleton-tag" />
+      </div>
+      <div className="skeleton-strip">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div key={i} className="skeleton-bar" />
+        ))}
+      </div>
+      <div className="skeleton-metrics">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton-metric">
+            <div className="skeleton-text skeleton-value" />
+            <div className="skeleton-text skeleton-name" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ selectedZoneId, onSelectZone }) {
   const [zones, setZones] = useState([]);
   const [error, setError] = useState(null);
@@ -33,15 +57,18 @@ export default function Dashboard({ selectedZoneId, onSelectZone }) {
         </div>
       )}
       <div className="zone-grid">
-        {zones.map((zone) => (
-          <ZoneCard
-            key={zone.id}
-            zone={zone}
-            selected={zone.id === selectedZoneId}
-            onSelect={onSelectZone}
-          />
-        ))}
-        {!zones.length && !error && <div className="empty-state">Loading live zones…</div>}
+        {zones.length > 0 ? (
+          zones.map((zone) => (
+            <ZoneCard
+              key={zone.id}
+              zone={zone}
+              selected={zone.id === selectedZoneId}
+              onSelect={onSelectZone}
+            />
+          ))
+        ) : !error ? (
+          Array.from({ length: 7 }).map((_, i) => <ZoneCardSkeleton key={i} />)
+        ) : null}
       </div>
     </div>
   );
