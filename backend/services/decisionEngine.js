@@ -23,16 +23,52 @@ const THRESHOLDS = {
 };
 
 /**
+ * Single source of truth for severity ordering. Used both to decide whether
+ * a new finding should "bump" a zone's severity up (classifyZone) and to
+ * sort a snapshot most-severe-first (classifySnapshot). Previously these
+ * lived as two separately-typed-out objects that could silently drift out
+ * of sync; consolidating avoids that class of bug.
+ * @type {Record<"normal"|"watch"|"alert"|"critical", number>}
+ */
+const SEVERITY_RANK = { normal: 0, watch: 1, alert: 2, critical: 3 };
+
+/**
+ * @typedef {Object} ZoneSnapshot
+ * @property {string} id
+ * @property {string} label
+ * @property {number} capacity
+ * @property {number} occupancy
+ * @property {number} occupancyRatio - 0..1+ (can exceed 1 if over capacity)
+ * @property {number} queueMinutes
+ * @property {"rising"|"falling"|"stable"} trend
+ * @property {string|null} incident
+ */
+
+/**
+ * @typedef {ZoneSnapshot & {severity: "normal"|"watch"|"alert"|"critical", reasons: string[]}} ClassifiedZone
+ */
+
+/**
+ * @typedef {Object} CandidateAction
+ * @property {string} action - machine-readable action key, e.g. "open_auxiliary_entry"
+ * @property {string} detail - human-readable instruction for the operator
+ */
+
+/**
  * Classifies a single zone snapshot into a severity tier with the specific
  * reasons that triggered it. Pure function, no side effects.
+ * @param {ZoneSnapshot} zone
+ * @returns {ClassifiedZone}
  */
 function classifyZone(zone) {
+  /** @type {string[]} */
   const reasons = [];
+  /** @type {"normal"|"watch"|"alert"|"critical"} */
   let severity = "normal";
 
+  /** @param {"watch"|"alert"|"critical"} level */
   const bump = (level) => {
-    const order = { normal: 0, watch: 1, alert: 2, critical: 3 };
-    if (order[level] > order[severity]) severity = level;
+    if (SEVERITY_RANK[level] > SEVERITY_RANK[severity]) severity = level;
   };
 
   if (zone.occupancyRatio >= THRESHOLDS.occupancy.critical) {
@@ -69,12 +105,15 @@ function classifyZone(zone) {
   return { ...zone, severity, reasons };
 }
 
-/** Classifies an entire snapshot array and sorts most-severe first. */
+/**
+ * Classifies an entire snapshot array and sorts most-severe first.
+ * @param {ZoneSnapshot[]} snapshot
+ * @returns {ClassifiedZone[]}
+ */
 function classifySnapshot(snapshot) {
-  const order = { critical: 0, alert: 1, watch: 2, normal: 3 };
   return snapshot
     .map(classifyZone)
-    .sort((a, b) => order[a.severity] - order[b.severity]);
+    .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
 }
 
 /**
@@ -82,6 +121,8 @@ function classifySnapshot(snapshot) {
  * "logical decision making" layer -- fixed operational playbook rules, not
  * an LLM guess. Gemini later narrates/prioritizes these, it does not author
  * them from scratch.
+ * @param {ClassifiedZone} classifiedZone
+ * @returns {CandidateAction[]}
  */
 function suggestActions(classifiedZone) {
   const actions = [];
@@ -120,4 +161,4 @@ function suggestActions(classifiedZone) {
   return actions;
 }
 
-export { classifyZone, classifySnapshot, suggestActions, THRESHOLDS };
+export { classifyZone, classifySnapshot, suggestActions, THRESHOLDS, SEVERITY_RANK };

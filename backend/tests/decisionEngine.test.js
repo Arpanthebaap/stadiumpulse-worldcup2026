@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyZone, suggestActions } from "../services/decisionEngine.js";
+import { classifyZone, classifySnapshot, suggestActions, SEVERITY_RANK } from "../services/decisionEngine.js";
 
 function makeZone(overrides = {}) {
   return {
@@ -56,4 +56,30 @@ test("watch-tier zones only get a monitor action, no overreaction", () => {
   const actions = suggestActions(classified);
   assert.equal(actions.length, 1);
   assert.equal(actions[0].action, "monitor");
+});
+
+test("classifySnapshot sorts most-severe zones first", () => {
+  const snapshot = [
+    makeZone({ id: "normal-zone", occupancyRatio: 0.2 }),
+    makeZone({ id: "critical-zone", occupancyRatio: 1.1 }),
+    makeZone({ id: "watch-zone", occupancyRatio: 0.8 }),
+    makeZone({ id: "alert-zone", occupancyRatio: 0.92 }),
+  ];
+  const sorted = classifySnapshot(snapshot);
+  assert.deepEqual(
+    sorted.map((z) => z.id),
+    ["critical-zone", "alert-zone", "watch-zone", "normal-zone"]
+  );
+});
+
+test("classifySnapshot preserves all zones — no data loss during sort", () => {
+  const snapshot = [makeZone({ id: "a" }), makeZone({ id: "b" }), makeZone({ id: "c" })];
+  const sorted = classifySnapshot(snapshot);
+  assert.equal(sorted.length, 3);
+});
+
+test("SEVERITY_RANK is monotonically increasing with real-world severity", () => {
+  assert.ok(SEVERITY_RANK.normal < SEVERITY_RANK.watch);
+  assert.ok(SEVERITY_RANK.watch < SEVERITY_RANK.alert);
+  assert.ok(SEVERITY_RANK.alert < SEVERITY_RANK.critical);
 });

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { getSnapshot, getZoneById } from "../services/simulator.js";
-import { classifySnapshot, suggestActions } from "../services/decisionEngine.js";
+import { classifyZone, classifySnapshot, suggestActions } from "../services/decisionEngine.js";
 import {
   narrateRecommendation,
   draftAnnouncement,
@@ -22,6 +22,43 @@ const geminiRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: "Rate limit exceeded. Try again shortly." },
 });
+
+/**
+ * Wraps a Gemini-backed route handler so every route doesn't repeat the same
+ * try/catch/502 boilerplate. Each handler returns its JSON payload (or
+ * throws an Error, optionally with a `statusCode`); this wrapper turns a
+ * thrown error into the right status code with a `detail` field, and a
+ * returned value into a 200 JSON response.
+ * @param {string} failureMessage - shown in the "error" field on an unexpected (502) failure
+ * @param {(req: import('express').Request) => Promise<object>} handler
+ */
+function asyncGeminiRoute(failureMessage, handler) {
+  return async (req, res) => {
+    try {
+      const payload = await handler(req);
+      res.json(payload);
+    } catch (err) {
+      const statusCode = err.statusCode || 502;
+      const errorLabel = err.statusCode ? err.message : failureMessage;
+      const body = { error: errorLabel };
+      if (!err.statusCode) body.detail = String(err.message || err);
+      res.status(statusCode).json(body);
+    }
+  };
+}
+
+/**
+ * Validates that `value` is a non-empty string under `maxLength`.
+ * @param {unknown} value
+ * @param {number} [maxLength]
+ * @returns {string|null} the trimmed string, or null if invalid
+ */
+function validateShortText(value, maxLength = 500) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength) return null;
+  return trimmed;
+}
 
 /** GET /api/status - simple health/config check (no secrets exposed) */
 router.get("/status", (req, res) => {
@@ -48,52 +85,54 @@ router.get("/simulate", (req, res) => {
 });
 
 /** GET /api/decide/:zoneId - full recommendation for one zone (rules + Gemini narration) */
-router.get("/decide/:zoneId", geminiRateLimit, async (req, res) => {
-  const zone = getZoneById(req.params.zoneId);
-  if (!zone) return res.status(404).json({ error: "Zone not found" });
-
-  const { classifyZone } = await import("../services/decisionEngine.js");
-  const classified = classifyZone(zone);
-  const actions = suggestActions(classified);
-
-  try {
+router.get(
+  "/decide/:zoneId",
+  geminiRateLimit,
+  asyncGeminiRoute("Copilot narration failed", async (req) => {
+    const zone = getZoneById(req.params.zoneId);
+    if (!zone) {
+      const notFound = new Error("Zone not found");
+      notFound.statusCode = 404;
+      throw notFound;
+    }
+    const classified = classifyZone(zone);
+    const actions = suggestActions(classified);
     const narration = await narrateRecommendation(classified, actions);
-    res.json({ zone: classified, actions, narration });
-  } catch (err) {
-    res.status(502).json({ error: "Copilot narration failed", detail: String(err.message || err) });
-  }
-});
+    return { zone: classified, actions, narration };
+  })
+);
 
 /** POST /api/announce { text, languages } - draft + translate a PA announcement */
-router.post("/announce", geminiRateLimit, async (req, res) => {
-  const { text, languages } = req.body || {};
-  if (!text || typeof text !== "string" || text.length > 500) {
-    return res.status(400).json({ error: "Provide 'text' (string, max 500 chars)." });
-  }
-  const safeLangs = Array.isArray(languages) && languages.length
-    ? languages.slice(0, 6).map(String)
-    : ["hi", "es", "fr"];
-
-  try {
-    const result = await draftAnnouncement(text, safeLangs);
-    res.json(result);
-  } catch (err) {
-    res.status(502).json({ error: "Announcement drafting failed", detail: String(err.message || err) });
-  }
-});
+router.post(
+  "/announce",
+  geminiRateLimit,
+  asyncGeminiRoute("Announcement drafting failed", async (req) => {
+    const text = validateShortText(req.body?.text);
+    if (!text) {
+      const badRequest = new Error("Provide 'text' (string, max 500 chars).");
+      badRequest.statusCode = 400;
+      throw badRequest;
+    }
+    const { languages } = req.body || {};
+    const safeLangs =
+      Array.isArray(languages) && languages.length ? languages.slice(0, 6).map(String) : ["hi", "es", "fr"];
+    return draftAnnouncement(text, safeLangs);
+  })
+);
 
 /** POST /api/triage { report } - structure a free-text incident report */
-router.post("/triage", geminiRateLimit, async (req, res) => {
-  const { report } = req.body || {};
-  if (!report || typeof report !== "string" || report.length > 500) {
-    return res.status(400).json({ error: "Provide 'report' (string, max 500 chars)." });
-  }
-  try {
-    const result = await triageIncident(report);
-    res.json(result);
-  } catch (err) {
-    res.status(502).json({ error: "Triage failed", detail: String(err.message || err) });
-  }
-});
+router.post(
+  "/triage",
+  geminiRateLimit,
+  asyncGeminiRoute("Triage failed", async (req) => {
+    const report = validateShortText(req.body?.report);
+    if (!report) {
+      const badRequest = new Error("Provide 'report' (string, max 500 chars).");
+      badRequest.statusCode = 400;
+      throw badRequest;
+    }
+    return triageIncident(report);
+  })
+);
 
 export default router;
